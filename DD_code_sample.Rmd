@@ -1,0 +1,94 @@
+---
+title: "DD_code_sample"
+author: "Johanna Fornberg"
+date: '2023-01-25'
+output: html_document
+---
+
+This is a sample of code from a project on transmission of parasites between multiple non-human host species. This model (which is in-progress) is meant to simulate transmission using SI-style equations. In addition to transmission, this model also simulates dispersal of each host and parasite life stage in order to understand how transmission varies in space. The end goal of this project is to gain a better understanding of how spatial variance and covariance of hosts and parasite life stages affects transmission dynamics in natural systems.
+
+```{r}
+library(tidyverse)
+library(deSolve)
+library(reshape2)
+
+hostparmodel <- function(time, state, parameters) { # SI transmission model
+  with(as.list(c(state, parameters)), {
+    Sdh = matrix(state[1:6], nrow = 2, ncol=3) # three host groups
+    Idh = matrix(state[1:6], nrow = 2, ncol=3)
+    S2h = matrix(state[1:6], nrow = 2, ncol=3)
+    I2h = matrix(state[1:6], nrow = 2, ncol=3)
+    S1h = matrix(state[1:6], nrow = 2, ncol=3)
+    I1h = matrix(state[1:6], nrow = 2, ncol=3)
+    C = matrix(state[1:6], nrow = 2, ncol=3) # two parasitic life stages
+    M = matrix(state[1:6], nrow = 2, ncol=3)
+    
+    # transmission model ODEs 
+    dSdhdt = nu_dh*(Sdh + Idh)*(1 - gamma3*(Sdh + Idh)) - beta*Sdh*I2h - beta*Sdh - mu_dh*Sdh 
+    dIdhdt = beta*Sdh*I2h + beta*Sdh - mu_dh*Idh
+  
+    dS2hdt = nu_2h*(S2h + I2h)*(1 - gamma2*(S2h + I2h)) - beta*S2h - mu_2h*S2h 
+    dI2hdt = beta*S2h - mu_2h*I2h
+  
+    dS1hdt = nu_1h*S1h*(1 - gamma*(S1h + I1h)) - beta*S1h - mu_1h*S1h 
+    dI1hdt = beta*S1h - mu_1h*I1h 
+    
+    dCdt = zeta*I1h - beta*S2h*C - beta*Sdh*C - mu_C*C
+    dMdt = phi*Idh - beta*S1h*M - mu_M*M 
+    
+    disperse <- function(state){ # dispersal function
+      foreach(i = 1:length(state)) %do% { # disperse each host and parasite life stage
+        Sdh[[i]] = Sdh[[i+1]]*rpois(n(),lambda=Sdh/5)  # 1 in 5 birds will disperse
+        Idh[[i]] = Idh[[i+1]]*rpois(n(),lambda=Idh/5)  # infection doesn't affect dispersal
+        S2h[[i]] = S2h[[i+1]]*rpois(n(),lambda=S2h)  
+        I2h[[i]] = I2h[[i+1]]*rpois(n(),lambda=I2h)  
+        S1h[[i]] = S1h[[i+1]]*rpois(n(),lambda=S1h/1000)  
+        I1h[[i]] = I1h[[i+1]]*rpois(n(),lambda=I1h/1000)  
+        C[[i]] = C[[i+1]]*rpois(n(),lambda=C/1.2)  
+        M[[i]] = M[[i+1]]*rpois(n(),lambda=M/1.1)  
+        }
+    }
+
+    return(list(c(dSdhdt, dIdhdt, dS2hdt, dI2hdt, dS1hdt, dI1hdt,dCdt,dMdt)))
+  })
+}
+
+# setting up parameter values
+parameters = c(nu_dh = 0.002, # birth rate
+               mu_dh = 0.0002, # background death rate
+               nu_2h = 0.008, # birth rate
+               mu_2h = 0.0004, # background death rate
+               nu_1h = 0.0137, # birth rate
+               mu_1h = 0.0003, # background death rate
+               mu_C = 0.91, #  background death rate
+               mu_M = 3.04, #  background death rate
+               gamma = 1, # density dependence
+               zeta = 350, # shedding rate of cercaria from IH 
+               phi = 350, # shedding rate of miracidia from DH 
+               beta = 0.000004, # infection rate 
+               gamma2 = 0.11, # density dependence
+               gamma3 = 0.09) # density dependence
+
+# setting a series of time points 
+times = seq(0, 100, by=0.1)
+
+# setting up initial population sizes 
+for (i in 1:length(init)) {
+  if(init[i] == 107){names(init[i]) = paste("Sdh",i,sep="")}
+  if(init[i] == 10){names(init[i]) = paste("Idh",i,sep="")} 
+  if(init[i] == 204){names(init[i]) = paste("S2h",i,sep="")}
+  if(init[i] == 10){names(init[i]) = paste("I2h",i,sep="")}
+  if(init[i] == 402){names(init[i]) = paste("S1h",i,sep="")}
+  if(init[i] == 10){names(init[i]) = paste("I1h",i,sep="")}
+  if(init[i] == 2000){names(init[i]) = paste("C",i,sep="")}
+  if(init[i] == 1500){names(init[i]) = paste("M",i,sep="")}
+}
+
+
+out <- ode(y=init, times=times, func=hostparmodel, parms=parameters) # solve the differential equations 
+
+# graph the output to see trajectory of each group over time
+ggplot(melt(as.data.frame(as.matrix(out)), id='time'), aes(time, value, col=variable)) + 
+  geom_point() + geom_line() + facet_wrap(~variable)
+
+```
